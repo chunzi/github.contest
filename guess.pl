@@ -4,31 +4,27 @@
 use strict;
 use File::Slurp;
 use Math::Complex;
-use Data::Dumper;
 use Time::Progress;
+use Class::Date qw/date/;
+
+my $repos = {};
+my $user = {};
 local $|=1;
 
-my $simrepos_cache = {};
-my $score_cache = {};
-my $repos = {};
-my $repos_name_keys = {};
-
-# load
+#-------------------------------------------
 print "loading data...\n";
 for ( grep { chomp } read_file('repos.txt') ){
     my ( $rid, $rest ) = split(':', $_);
-    my ( $path, $date, $frid ) = split(',', $rest);
+    my ( $path, $created, $frid ) = split(',', $rest);
     my ( $owner, $name ) = split('/', $path);
 
-    my @name_keys = split(/\W/, $name);
-    map { push @{$repos_name_keys->{$_}}, $rid } @name_keys;
-
+    my @keywords = split(/\W/, $name);
     $repos->{$rid} = {
-        id => $rid,
+        rid => $rid,
         name => $name,
-        name_keys => \@name_keys,
+        keywords => \@keywords,
         owner => $owner,
-        created => $date,
+        created => int(date($created)->epoch/86400),
         forked => $frid,
     };
 }
@@ -37,120 +33,106 @@ for ( grep { chomp } read_file('lang.txt') ){
     my @parts = split(',', $rest);
     map {
         my ( $lang, $lines ) = split(';', $_);
-        $repos->{$rid}{'lang'}{$lang} = $lines;
+        $repos->{$rid}{'lang'}{$lang} = length $lines;
     } @parts;
 }
-my $user = {};
 for ( grep { chomp } read_file('data.txt') ){
     my ( $uid, $rid ) = split(':', $_);
-    push @{$repos->{$rid}{'watched_by'}}, $uid;
+    push @{$repos->{$rid}{'followed'}}, $uid;
     push @{$user->{$uid}}, $rid;
 }
+#my @test = grep { chomp } read_file('test.txt');
+my @test = grep { chomp } read_file('test.txt.small');
 
 
-# prepare
-print "caculating pref...\n";
-my $pref = {};
+#-------------------------------------------
+print "caculating popular repos topten...\n";
+my @popular_repos = sort { scalar @{$repos->{$b}{'followed'}} <=> scalar @{$repos->{$a}{'followed'}} } 
+                    grep { exists $repos->{$_}{'followed'} } keys %$repos;
+my @popular_repos_topten = splice( @popular_repos, 0, 10);
+
+
+#-------------------------------------------
+printf "caculating tastes for all the %d repos...\n", scalar keys %$repos;
 for my $rid ( keys %$repos ){
-    my $rep = $repos->{$rid};
-
-    $pref->{$rid}{'owner'}{$repos->{'owner'}}++; 
-    for my $uid ( @{$repos->{$rid}{'watched_by'}} ){
-        $pref->{$rid}{'watched_by'}{$uid}++;
-    }
-
-    for my $key ( @{$repos->{$rid}{'name_keys'}} ){
-        $pref->{$rid}{'repos_name'}{$key}++;
-    }
-
-    for my $lang ( keys %{$repos->{$rid}{'lang'}} ){
-        $pref->{$rid}{'lang'}{$lang} += $repos->{$rid}{'lang'}{$lang};
-    }
+    my $repo = $repos->{$rid};
+    my $taste = {};
+    $taste->{'owner'}{$repo->{'owner'}}++; 
+    map { $taste->{'followed'}{$_}++ } @{$repo->{'followed'}};
+    map { $taste->{'keywords'}{$_}++ } @{$repo->{'keywords'}};
+    map { $taste->{$rid}{'lang'}{$_} += $repo->{'lang'}{$_} } keys %{$repo->{'lang'}};
+    $repo->{'taste'} = $taste;
 }
-my @popular_repos = sort { scalar @{$repos->{$b}{'watched_by'}} <=> scalar @{$repos->{$a}{'watched_by'}} } keys %$repos;
-my @popular_topten = splice(@popular_repos, 0, 10);
 
 
-# output
-print "walking for the tests...\n";
-my @test = grep { chomp } read_file('test.txt');
-
-
-my $results;
-for ( @test ){
-    $results .= sprintf "%s:%s\n", $_, join(',', guess($_));
-}
-write_file( 'results.txt', $results);
+#-------------------------------------------
+printf "walking through the %d tests users...\n", scalar @test;
+write_file( 'results.txt', join('',
+    map{ sprintf "%s:%s\n", $_, join(',', guess($_)) } @test
+));
 exit;
 
 
 
 
-
-
+#-------------------------------------------
 sub guess {
     my $uid = shift;
-    print "uid: $_\n";
-    return @popular_topten unless exists $user->{$uid};
-    printf "watching: %s repos\n", scalar @{$user->{$uid}};
-    
-    my @similar;
-    map { push @similar, @$_ } map { similar_reposes( $_ ) } @{$user->{$uid}};
-    my @topten = map { $_->{'rid'} } sort { $b->{'score'} <=> $a->{'score'} } @similar;
+    return @popular_repos_topten unless exists $user->{$uid};
+    printf "uid %s watching %s repos, guessing...\n", $uid, scalar @{$user->{$uid}};
+     
+    my $taste = {};
+    my $skip = {};
+
+    my $followed = {};
+    my $keywords = {};
+    for ( @{$user->{$uid}} ){
+        my $repo = $repos->{$_};
+        $taste->{'owner'}{$repo->{'owner'}}++;
+        map { $followed->{$_}++ } @{$repo->{'followed'}};
+        map { $keywords->{$_}++ } @{$repo->{'keywords'}};
+        map { $taste->{'lang'}{$_} += $repo->{'lang'}{$_} } keys %{$repo->{'lang'}};
+        $skip->{$_}++;
+    }
+    my @followed_sorted = sort { $followed->{$b} <=> $followed->{$a} } keys %$followed;
+    map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 10 );
+    my @keywords_sorted = sort { $keywords->{$b} <=> $keywords->{$a} } keys %$keywords;
+    map { $taste->{'keywords'}{$_} = $keywords->{$_} } splice( @keywords_sorted, 0, 10 );
+
+    my @other = grep { ! $skip->{$_} } keys %$repos;
+
+    my $p = new Time::Progress;
+    $p->restart( min => 1, max => scalar @other );
+    my $count = 0;
+
+    my $score = {};
+    for my $rid ( @other ){
+        my @scores = map { score_for_tastes( $_, $taste, $repos->{$rid}{'taste'} ) }
+            (qw/ owner followed keywords lang /);
+        $score->{$rid} = $scores[0]*0.2 + $scores[1]*0.5 + $scores[2]*0.2 + $scores[3]*0.1;
+        print $p->report( "%60b %p\r", ++$count );
+    }
+    $p->stop; print "\n";
+
+    my @sorted = ( sort { $score->{$b} <=> $score->{$a} } keys %$score )[0..20];
+    my @topten = ( sort { $score->{$b} <=> $score->{$a} || $repos->{$b}{'created'} <=> $repos->{$a}{'created'} } @sorted )[0..9];
+
+    map { 
+        printf " - %-7s %.6f %-10s  %s\n", 
+        $_->{'rid'}, $score->{$_->{'rid'}}, $_->{'owner'}, $_->{'name'}
+    } map { $repos->{$_} } @topten;
+
     return @topten;
 }
 
-sub similar_reposes {
-    my $rid = shift;
-    printf "finding similar repos for rid: %s\n", $rid;
-    return $simrepos_cache->{$rid} if exists $simrepos_cache->{$rid};
-
-    my $distance = {};
-    my $p = new Time::Progress;
-    $p->restart( min => 1, max => scalar keys %$pref );
-    my $ct = 0;
-    for my $oid ( keys %$pref ){
-        $ct++;
-        next if $oid == $rid; # skip self
-        $distance->{$oid} = get_score( $rid, $oid );
-        print $p->report( "%60b %p\r", $ct );
-    }
-    $p->stop;
-    print "\n";
-
-    my @similar = sort { $distance->{$b} <=> $distance->{$a} } keys %$distance;
-    my @topten = splice( @similar, 0, 10 );
-    my @ret = map { { rid => $_, name => $repos->{$_}{'name'}, score => $distance->{$_} } } @topten;
-    $simrepos_cache->{$rid} = \@ret;
-
-    return \@ret;
-} 
-
-sub get_score {
-    my ( $rid, $oid ) = @_;
-    my $ck1 = join('.',$rid,$oid);
-    my $ck2 = join('.',$oid,$rid);
-    return $score_cache->{$ck1} if exists $score_cache->{$ck1};
-    return $score_cache->{$ck2} if exists $score_cache->{$ck2};
-    my $score_owner = distance_for_item( 'owner', $rid, $oid );
-    my $score_watched_by = distance_for_item( 'watched_by', $rid, $oid );
-    #my $score_repos_name = distance_for_item( 'repos_name', $rid, $oid );
-    my $score_lang = distance_for_item( 'lang', $rid, $oid );
-    #my $score = $score_owner*0.3 + $score_watched_by*0.4 + $score_repos_name*0.2 + $score_lang*0.1;
-    my $score = $score_owner*0.4 + $score_watched_by*0.5 + $score_lang*0.1;
-    $score_cache->{$ck1} = $score;
-    $score_cache->{$ck2} = $score;
-    return $score;
-}
-
-sub distance_for_item {
-    my ( $item, $rid, $oid ) = @_;
+sub score_for_tastes {
+    my ( $item, $tu, $tr ) = @_;
     my $sum = 0;
     my $count = 0;
-    for my $key ( keys %{$pref->{$rid}{$item}} ){
-        if ( exists $pref->{$rid}{$item}{$key} ){
-            my $rc = $pref->{$rid}{$item}{$key};
-            my $oc = $pref->{$oid}{$item}{$key};
+    for my $key ( keys %{$tu->{$item}} ){
+        if ( exists $tr->{$item}{$key} ){
+            my $rc = $tu->{$item}{$key};
+            my $oc = $tr->{$item}{$key};
             $sum += ($rc-$oc)**2;
             $count++;
         }
@@ -159,3 +141,4 @@ sub distance_for_item {
     my $score = 1 / ( 1 + sqrt($sum) );
     return $score;
 } 
+
