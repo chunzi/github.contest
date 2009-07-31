@@ -24,7 +24,7 @@ for ( grep { chomp } read_file('repos.txt') ){
         keywords => \@keywords,
         owner => $owner,
         created => int(date($created)->epoch/86400),
-        forked => $frid,
+        frid => $frid,
     };
 }
 for ( grep { chomp } read_file('lang.txt') ){
@@ -78,7 +78,7 @@ exit;
 sub guess {
     my $uid = shift;
     return @popular_repos_topten unless exists $user->{$uid};
-    printf "%d) uid %s watching %s repos, guessing...\n", --$left, $uid, scalar @{$user->{$uid}};
+    printf "%d) uid %s watching %s repos, guessing...\n", $left--, $uid, scalar @{$user->{$uid}};
      
     my $taste = {};
     my $skip = {};
@@ -92,6 +92,7 @@ sub guess {
         map { $keywords->{$_}++ } @{$repo->{'keywords'}};
         map { $taste->{'lang'}{$_} += $repo->{'lang'}{$_} } keys %{$repo->{'lang'}};
         $skip->{$_}++;
+        $skip->{$repo->{'frid'}}++ if $repo->{'frid'};
     }
     my @followed_sorted = sort { $followed->{$b} <=> $followed->{$a} } keys %$followed;
     map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 10 );
@@ -107,8 +108,18 @@ sub guess {
         $score->{$rid} = $scores[0]*0.2 + $scores[1]*0.5 + $scores[2]*0.2 + $scores[3]*0.1;
     }
 
-    my @sorted = ( sort { $score->{$b} <=> $score->{$a} } keys %$score )[0..20];
-    my @topten = ( sort { $score->{$b} <=> $score->{$a} || $repos->{$b}{'created'} <=> $repos->{$a}{'created'} } @sorted )[0..9];
+    my @sorted = ( sort { $score->{$b} <=> $score->{$a} } keys %$score )[0..50];
+    my @sorted_late = sort { $score->{$b} <=> $score->{$a} || $repos->{$b}{'created'} <=> $repos->{$a}{'created'} } @sorted;
+    my @topten; my $samename = {};
+    for ( @sorted_late ){
+        last if scalar @topten >= 10;
+        next if $samename->{$repos->{$_}{'name'}};
+        last if $score->{$_} == 0;
+        push @topten, $_;
+        $samename->{$repos->{$_}{'name'}}++;
+    }
+    my $more = 10 - scalar @topten;
+    push @topten, @popular_repos_topten[0..$more-1] if $more;
 
     map { 
         printf " - %-7s %.6f %-10s  %s\n", 
