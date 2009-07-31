@@ -4,7 +4,6 @@
 use strict;
 use File::Slurp;
 use Math::Complex;
-use Time::Progress;
 use Class::Date qw/date/;
 
 my $repos = {};
@@ -41,8 +40,8 @@ for ( grep { chomp } read_file('data.txt') ){
     push @{$repos->{$rid}{'followed'}}, $uid;
     push @{$user->{$uid}}, $rid;
 }
-#my @test = grep { chomp } read_file('test.txt');
-my @test = grep { chomp } read_file('test.txt.small');
+my @test = grep { chomp } read_file('test.txt');
+my $left = scalar @test;
 
 
 #-------------------------------------------
@@ -79,7 +78,7 @@ exit;
 sub guess {
     my $uid = shift;
     return @popular_repos_topten unless exists $user->{$uid};
-    printf "uid %s watching %s repos, guessing...\n", $uid, scalar @{$user->{$uid}};
+    printf "%d) uid %s watching %s repos, guessing...\n", --$left, $uid, scalar @{$user->{$uid}};
      
     my $taste = {};
     my $skip = {};
@@ -101,18 +100,12 @@ sub guess {
 
     my @other = grep { ! $skip->{$_} } keys %$repos;
 
-    my $p = new Time::Progress;
-    $p->restart( min => 1, max => scalar @other );
-    my $count = 0;
-
     my $score = {};
     for my $rid ( @other ){
         my @scores = map { score_for_tastes( $_, $taste, $repos->{$rid}{'taste'} ) }
             (qw/ owner followed keywords lang /);
         $score->{$rid} = $scores[0]*0.2 + $scores[1]*0.5 + $scores[2]*0.2 + $scores[3]*0.1;
-        print $p->report( "%60b %p\r", ++$count );
     }
-    $p->stop; print "\n";
 
     my @sorted = ( sort { $score->{$b} <=> $score->{$a} } keys %$score )[0..20];
     my @topten = ( sort { $score->{$b} <=> $score->{$a} || $repos->{$b}{'created'} <=> $repos->{$a}{'created'} } @sorted )[0..9];
