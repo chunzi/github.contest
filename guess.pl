@@ -4,7 +4,7 @@
 use strict;
 use File::Slurp;
 use Math::Complex;
-use Class::Date qw/date/;
+use Data::Dumper;
 
 my $repos = {};
 my $user = {};
@@ -23,7 +23,7 @@ for ( grep { chomp } read_file('repos.txt') ){
         name => $name,
         keywords => \@keywords,
         owner => $owner,
-        created => int(date($created)->epoch/86400),
+        created => $created,
         frid => $frid,
     };
 }
@@ -83,47 +83,45 @@ sub guess {
     my $taste = {};
     my $skip = {};
 
+    my $owner = {};
     my $followed = {};
     my $keywords = {};
     for ( @{$user->{$uid}} ){
         my $repo = $repos->{$_};
-        $taste->{'owner'}{$repo->{'owner'}}++;
+        $owner->{$repo->{'owner'}}++;
         map { $followed->{$_}++ } @{$repo->{'followed'}};
         map { $keywords->{$_}++ } @{$repo->{'keywords'}};
         map { $taste->{'lang'}{$_} += $repo->{'lang'}{$_} } keys %{$repo->{'lang'}};
         $skip->{$_}++;
         $skip->{$repo->{'frid'}}++ if $repo->{'frid'};
     }
+    my @owner_sorted = sort { $owner->{$b} <=> $owner->{$a} } keys %$owner;
+    map { $taste->{'owner'}{$_} = $owner->{$_} } splice( @owner_sorted, 0, 3 );
     my @followed_sorted = sort { $followed->{$b} <=> $followed->{$a} } keys %$followed;
-    map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 10 );
+    map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 3 );
     my @keywords_sorted = sort { $keywords->{$b} <=> $keywords->{$a} } keys %$keywords;
-    map { $taste->{'keywords'}{$_} = $keywords->{$_} } splice( @keywords_sorted, 0, 10 );
+    map { $taste->{'keywords'}{$_} = $keywords->{$_} } splice( @keywords_sorted, 0, 3 );
+    #print Dumper( Dumper($taste) );
 
     my @other = grep { ! $skip->{$_} } keys %$repos;
 
     my $score = {};
+    my $sd = {};
     for my $rid ( @other ){
         my @scores = map { score_for_tastes( $_, $taste, $repos->{$rid}{'taste'} ) }
             (qw/ owner followed keywords lang /);
-        $score->{$rid} = $scores[0]*0.2 + $scores[1]*0.5 + $scores[2]*0.2 + $scores[3]*0.1;
+        $score->{$rid} = $scores[0]*0.1 + $scores[1]*0.6 + $scores[2]*0.3;
+        #$score->{$rid} = $scores[0]*0.2 + $scores[1]*0.5 + $scores[2]*0.2 + $scores[3]*0.1;
+        $sd->{$rid} = sprintf "%.2f  %.2f  %.2f  %.2f", @scores;
     }
 
-    my @sorted = ( sort { $score->{$b} <=> $score->{$a} } keys %$score )[0..50];
-    my @sorted_late = sort { $score->{$b} <=> $score->{$a} || $repos->{$b}{'created'} <=> $repos->{$a}{'created'} } @sorted;
-    my @topten; my $samename = {};
-    for ( @sorted_late ){
-        last if scalar @topten >= 10;
-        next if $samename->{$repos->{$_}{'name'}};
-        last if $score->{$_} == 0;
-        push @topten, $_;
-        $samename->{$repos->{$_}{'name'}}++;
-    }
-    my $more = 10 - scalar @topten;
-    push @topten, @popular_repos_topten[0..$more-1] if $more;
+    my @sorted = sort { $score->{$b} <=> $score->{$a} } grep { $score->{$_} > 0 } keys %$score;
+    push @sorted, @popular_repos_topten;
+    my @topten = @sorted[0..9];
 
     map { 
-        printf " - %-7s %.6f %-10s  %s\n", 
-        $_->{'rid'}, $score->{$_->{'rid'}}, $_->{'owner'}, $_->{'name'}
+        printf " - %-7s %.6f %s %15s %-20s\n", 
+        $_->{'rid'}, $score->{$_->{'rid'}}, $sd->{$_->{'rid'}}, $_->{'owner'}, $_->{'name'}
     } map { $repos->{$_} } @topten;
 
     return @topten;
