@@ -16,8 +16,16 @@ for ( grep { chomp } read_file('repos.txt') ){
     my ( $rid, $rest ) = split(':', $_);
     my ( $path, $created, $frid ) = split(',', $rest);
     my ( $owner, $name ) = split('/', $path);
+    
 
-    my @keywords = split(/\W/, $name);
+    my $kname = lc $name;
+    $kname =~ s/\.github\.com//;
+    my @keywords = split(/\W/, $kname);
+    my @more = map { $_ } grep { $name =~ /$_/  } 
+        qw/ rail perl vim python ruby twitter erlang /;
+    push @keywords, @more;
+
+
     $repos->{$rid} = {
         rid => $rid,
         name => $name,
@@ -96,11 +104,11 @@ sub guess {
         $skip->{$repo->{'frid'}}++ if $repo->{'frid'};
     }
     my @owner_sorted = sort { $owner->{$b} <=> $owner->{$a} } keys %$owner;
-    map { $taste->{'owner'}{$_} = $owner->{$_} } splice( @owner_sorted, 0, 3 );
+    map { $taste->{'owner'}{$_} = $owner->{$_} } splice( @owner_sorted, 0, 10 );
     my @followed_sorted = sort { $followed->{$b} <=> $followed->{$a} } keys %$followed;
-    map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 3 );
+    map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 10 );
     my @keywords_sorted = sort { $keywords->{$b} <=> $keywords->{$a} } keys %$keywords;
-    map { $taste->{'keywords'}{$_} = $keywords->{$_} } splice( @keywords_sorted, 0, 3 );
+    map { $taste->{'keywords'}{$_} = $keywords->{$_} } splice( @keywords_sorted, 0, 10 );
     #print Dumper( Dumper($taste) );
 
     my @other = grep { ! $skip->{$_} } keys %$repos;
