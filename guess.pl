@@ -138,9 +138,9 @@ sub guess {
     $weight->{'keywords'}{'total'}++; # avoid div zero
     $weight->{'lang'}{'total'}++; # avoid div zero
 
-    my $wo = 1 * $weight->{'owner'}{'topten'} / $weight->{'owner'}{'total'};
-    my $wf = 3 * $weight->{'followed'}{'topten'} / $weight->{'followed'}{'total'};
-    my $wk = 5 * $weight->{'keywords'}{'topten'} / $weight->{'keywords'}{'total'};
+    my $wo = 3 * $weight->{'owner'}{'topten'} / $weight->{'owner'}{'total'};
+    my $wf = 6 * $weight->{'followed'}{'topten'} / $weight->{'followed'}{'total'};
+    my $wk = 9 * $weight->{'keywords'}{'topten'} / $weight->{'keywords'}{'total'};
     my $wl = 1 * $weight->{'lang'}{'top'} / $weight->{'lang'}{'total'};
     my $wsum = $wo + $wf + $wk + $wl;
 
