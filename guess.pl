@@ -8,6 +8,7 @@ use Data::Dumper;
 
 my $repos = {};
 my $user = {};
+my $map = {};
 local $|=1;
 
 #-------------------------------------------
@@ -20,10 +21,12 @@ for ( grep { chomp } read_file('repos.txt') ){
 
     my $kname = lc $name;
     $kname =~ s/\.github\.com//;
-    my @keywords = split(/\W/, $kname);
+    my @keywords = grep { defined $_ and length $_ > 2 } split(/\W|_/, $kname);
     my @more = map { $_ } grep { $name =~ /$_/  } 
-        qw/ rail perl vim python ruby twitter erlang /;
+        qw/ git ruby rail rake perl python php erlang jquery javascript twitter vim /;
+    #map { print "$_\n" } @keywords;
     push @keywords, @more;
+    #printf "%-20s:  %s\n", $name, join(',', @keywords);
 
 
     $repos->{$rid} = {
@@ -34,6 +37,9 @@ for ( grep { chomp } read_file('repos.txt') ){
         created => $created,
         frid => $frid,
     };
+
+    push @{$map->{'owner'}{$owner}}, $rid;
+    map { push @{$map->{'keywords'}{$_}}, $rid } @keywords;
 }
 for ( grep { chomp } read_file('lang.txt') ){
     my ( $rid, $rest ) = split(':', $_);
@@ -47,6 +53,7 @@ for ( grep { chomp } read_file('data.txt') ){
     my ( $uid, $rid ) = split(':', $_);
     push @{$repos->{$rid}{'followed'}}, $uid;
     push @{$user->{$uid}}, $rid;
+    push @{$map->{'followed'}{$uid}}, $rid;
 }
 my @test = grep { chomp } read_file('test.txt');
 my $left = scalar @test;
@@ -86,7 +93,7 @@ exit;
 sub guess {
     my $uid = shift;
     return @popular_repos_topten unless exists $user->{$uid};
-    printf "%d) uid %s watching %s repos, guessing...\n", $left--, $uid, scalar @{$user->{$uid}};
+    printf "%d) uid %s watching %s repos, guessing ", $left--, $uid, scalar @{$user->{$uid}};
      
     my $taste = {};
     my $skip = {};
@@ -103,15 +110,43 @@ sub guess {
         $skip->{$_}++;
         #$skip->{$repo->{'frid'}}++ if $repo->{'frid'};
     }
+
+
+    my $weight = {};
     my @owner_sorted = sort { $owner->{$b} <=> $owner->{$a} } keys %$owner;
     map { $taste->{'owner'}{$_} = $owner->{$_} } splice( @owner_sorted, 0, 10 );
+    map { $weight->{'owner'}{'total'} += $owner->{$_} } keys %$owner;
+    map { $weight->{'owner'}{'topten'} += $owner->{$_} } keys %{$taste->{'owner'}};
+
     my @followed_sorted = sort { $followed->{$b} <=> $followed->{$a} } keys %$followed;
     map { $taste->{'followed'}{$_} = $followed->{$_} } splice( @followed_sorted, 0, 10 );
+    map { $weight->{'followed'}{'total'} += $followed->{$_} } keys %$followed;
+    map { $weight->{'followed'}{'topten'} += $followed->{$_} } keys %{$taste->{'followed'}};
+    
     my @keywords_sorted = sort { $keywords->{$b} <=> $keywords->{$a} } keys %$keywords;
     map { $taste->{'keywords'}{$_} = $keywords->{$_} } splice( @keywords_sorted, 0, 10 );
-    #print Dumper( Dumper($taste) );
+    map { $weight->{'keywords'}{'total'} += $keywords->{$_} } keys %$keywords;
+    map { $weight->{'keywords'}{'topten'} += $keywords->{$_} } keys %{$taste->{'keywords'}};
 
-    my @other = grep { ! $skip->{$_} } keys %$repos;
+
+    my @lang_sorted = sort { $taste->{'lang'}{$b} <=> $taste->{'lang'}{$a} } keys %{$taste->{'lang'}};
+    map { $weight->{'lang'}{'total'} += $taste->{'lang'}{$_} } keys %{$taste->{'lang'}};
+    $weight->{'lang'}{'top'} += $taste->{'lang'}{$lang_sorted[0]};
+
+    my $wo = 1 * $weight->{'owner'}{'topten'} / $weight->{'owner'}{'total'};
+    my $wf = 3 * $weight->{'followed'}{'topten'} / $weight->{'followed'}{'total'};
+    my $wk = 5 * $weight->{'keywords'}{'topten'} / $weight->{'keywords'}{'total'};
+    my $wl = 1 * $weight->{'lang'}{'top'} / $weight->{'lang'}{'total'};
+    my $wsum = $wo + $wf + $wk + $wl;
+
+
+    my $other = {};
+    map { map { $other->{$_}++ } @{$map->{'owner'}{$_}} } keys %{$taste->{'owner'}};
+    map { map { $other->{$_}++ } @{$map->{'followed'}{$_}} } keys %{$taste->{'followed'}};
+    map { map { $other->{$_}++ } @{$map->{'keywords'}{$_}} } keys %{$taste->{'keywords'}};
+    my @other = grep { ! $skip->{$_} } keys %$other;
+    printf "from other %s repos...\n", scalar @other;
+    printf "   weight: %.1f%%  %.1f%%  %.1f%%  %.1f%%\n", map { 100*$_/$wsum } $wo, $wf, $wk, $wl;
 
     my $score = {};
     my $sd = {};
@@ -119,7 +154,7 @@ sub guess {
         my @scores = map { score_for_tastes( $_, $taste, $repos->{$rid}{'taste'} ) }
             (qw/ owner followed keywords lang /);
         #$score->{$rid} = $scores[0]*0.1 + $scores[1]*0.6 + $scores[2]*0.3;
-        $score->{$rid} = ($scores[0]*3 + $scores[1]*6 + $scores[2]*9 + $scores[3]*1)/19;
+        $score->{$rid} = ($scores[0]*$wo + $scores[1]*$wf + $scores[2]*$wk + $scores[3]*$wl)/$wsum;
         $sd->{$rid} = sprintf "%.2f  %.2f  %.2f  %.2f", @scores;
     }
 
@@ -128,7 +163,7 @@ sub guess {
     my @topten = @sorted[0..9];
 
     map { 
-        printf " - %-7s %.6f %s %15s %-20s\n", 
+        printf " - %-7s %.6f %s %-15s %-20s\n", 
         $_->{'rid'}, $score->{$_->{'rid'}}, $sd->{$_->{'rid'}}, $_->{'owner'}, $_->{'name'}
     } map { $repos->{$_} } @topten;
 
