@@ -133,6 +133,11 @@ sub guess {
     map { $weight->{'lang'}{'total'} += $taste->{'lang'}{$_} } keys %{$taste->{'lang'}};
     $weight->{'lang'}{'top'} += $taste->{'lang'}{$lang_sorted[0]};
 
+    $weight->{'owner'}{'total'}++; # avoid div zero
+    $weight->{'followed'}{'total'}++; # avoid div zero
+    $weight->{'keywords'}{'total'}++; # avoid div zero
+    $weight->{'lang'}{'total'}++; # avoid div zero
+
     my $wo = 1 * $weight->{'owner'}{'topten'} / $weight->{'owner'}{'total'};
     my $wf = 3 * $weight->{'followed'}{'topten'} / $weight->{'followed'}{'total'};
     my $wk = 5 * $weight->{'keywords'}{'topten'} / $weight->{'keywords'}{'total'};
