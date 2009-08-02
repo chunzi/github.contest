@@ -101,7 +101,7 @@ sub guess {
         map { $keywords->{$_}++ } @{$repo->{'keywords'}};
         map { $taste->{'lang'}{$_} += $repo->{'lang'}{$_} } keys %{$repo->{'lang'}};
         $skip->{$_}++;
-        $skip->{$repo->{'frid'}}++ if $repo->{'frid'};
+        #$skip->{$repo->{'frid'}}++ if $repo->{'frid'};
     }
     my @owner_sorted = sort { $owner->{$b} <=> $owner->{$a} } keys %$owner;
     map { $taste->{'owner'}{$_} = $owner->{$_} } splice( @owner_sorted, 0, 10 );
